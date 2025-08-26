@@ -15,6 +15,10 @@ type Service interface {
 	// Stage returns the current lifecycle stage of the service.
 	// This can be used to monitor or orchestrate service state transitions.
 	Stage() Stage
+	// Error returns the terminal error that caused the service to stop, if any.
+	// If the service is still running or has completed successfully (i.e., without error), Error returns nil.
+	// This method is intended for post-mortem inspection of service failures and should not be used for real-time error handling.
+	Error() error
 	// Initialize prepares the service for execution.
 	// This method should be called before Run, and may perform setup such as resource allocation,
 	// configuration loading, or dependency checks.
