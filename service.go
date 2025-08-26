@@ -12,9 +12,6 @@ type Service interface {
 	// Version returns the version of the service implementation.
 	// This should be a semantic version (e.g., "1.2.3") or a date-based version (e.g., "2024-06-01").
 	Version() string
-	// Stage returns the current lifecycle stage of the service.
-	// This can be used to monitor or orchestrate service state transitions.
-	Stage() Stage
 	// Error returns the terminal error that caused the service to stop, if any.
 	// If the service is still running or has completed successfully (i.e., without error), Error returns nil.
 	// This method is intended for post-mortem inspection of service failures and should not be used for real-time error handling.
@@ -24,12 +21,12 @@ type Service interface {
 	// configuration loading, or dependency checks.
 	// The provided context can be used to cancel initialization early.
 	// Returns an error if initialization fails or is cancelled.
-	Initialize(context.Context) error
+	Initialize(*Handle) error
 	// Run starts the main execution loop of the service.
 	// This method should block until the service is stopped, fails, or the context is cancelled.
 	// If the context is cancelled, the service must begin a graceful shutdown.
 	// Returns an error if the service fails or is interrupted.
-	Run(Handle) error
+	Run(*Handle) error
 	// Shutdown gracefully stops the service and releases all resources.
 	// The provided context can be used to enforce a shutdown deadline or cancellation.
 	// After successful shutdown, the service must transition to the StageFinished state.

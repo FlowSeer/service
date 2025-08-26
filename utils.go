@@ -5,6 +5,28 @@ import (
 	"strings"
 )
 
+// envName constructs a normalized environment variable name by combining a prefix and a name.
+// If the prefix is empty, it defaults to "SERVICE_".
+// If the prefix does not end with an underscore, one is appended.
+// The resulting string (prefix + name) is then normalized to conform to environment variable naming conventions
+// using normalizeEnvName, which ensures uppercase, replaces invalid characters, collapses underscores, etc.
+//
+// Example usage:
+//
+//	envName("MYAPP", "LOG_LEVEL")   // returns "MYAPP_LOG_LEVEL"
+//	envName("", "CONFIG_PATH")      // returns "SERVICE_CONFIG_PATH"
+func envName(prefix string, name string) string {
+	if prefix == "" {
+		prefix = "SERVICE_"
+	} else {
+		if !strings.HasSuffix(prefix, "_") {
+			prefix += "_"
+		}
+	}
+
+	return normalizeEnvName(prefix + name)
+}
+
 // normalizeEnvName transforms an input string into a valid, conventional environment variable name.
 // The normalization process performs the following steps:
 //  1. Converts the input to uppercase for conventional env var style.

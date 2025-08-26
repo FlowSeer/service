@@ -5,6 +5,8 @@ go 1.24.5
 tool golang.org/x/tools/cmd/stringer
 
 require (
+	github.com/FlowSeer/fail v0.0.0-20250826093656-d9451a3c28cc // indirect
+	github.com/FlowSeer/wz v0.0.0-20250825190635-b4a4f3257a2c // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

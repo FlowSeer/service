@@ -22,11 +22,12 @@ const (
 // Context key types for storing log configuration in context.
 type logLevelKey struct{}
 type logFormatKey struct{}
+type loggerKey struct{}
 
 // WithLogLevel returns a new context with the specified log level.
 // The level parameter overrides the default log level for all operations
 // performed within the returned context.
-func WithLogLevel(ctx context.Context, level *slog.Leveler) context.Context {
+func WithLogLevel(ctx context.Context, level slog.Leveler) context.Context {
 	return context.WithValue(ctx, logLevelKey{}, level)
 }
 
@@ -46,15 +47,7 @@ func LogLevel(ctx context.Context) slog.Leveler {
 // Valid values are: "debug", "info", "warn", "error" (case-insensitive).
 // Returns slog.LevelInfo as the default if no valid level is found.
 func LogLevelFromEnv(prefix string) slog.Leveler {
-	if prefix == "" {
-		prefix = "SERVICE_"
-	} else {
-		if !strings.HasSuffix(prefix, "_") {
-			prefix += "_"
-		}
-	}
-
-	switch strings.ToLower(os.Getenv(normalizeEnvName(prefix + "LOG_LEVEL"))) {
+	switch strings.ToLower(os.Getenv(envName(prefix, "LOG_LEVEL"))) {
 	case "debug":
 		return slog.LevelDebug
 	case "info":
@@ -94,7 +87,7 @@ func LogFormatFromEnv(prefix string) LogFormat {
 		}
 	}
 
-	switch strings.ToLower(os.Getenv(normalizeEnvName(prefix + "LOG_FORMAT"))) {
+	switch strings.ToLower(os.Getenv(envName(prefix, "LOG_FORMAT"))) {
 	case "text", "pretty", "console":
 		return LogFormatText
 	case "json", "structured":
@@ -102,4 +95,27 @@ func LogFormatFromEnv(prefix string) LogFormat {
 	}
 
 	return LogFormatJson
+}
+
+func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
+	return context.WithValue(ctx, loggerKey{}, logger)
+}
+
+func LoggerFromEnv(prefix string) *slog.Logger {
+	level := LogLevelFromEnv(prefix)
+	format := LogFormatFromEnv(prefix)
+
+	var handler slog.Handler
+	switch format {
+	case LogFormatText:
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: level,
+		})
+	default:
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: level,
+		})
+	}
+
+	return slog.New(handler)
 }

@@ -1,3 +1,7 @@
+github.com/FlowSeer/fail v0.0.0-20250826093656-d9451a3c28cc h1:4PLXeg0GEjNl+Qw/1pN5oi2RoMAAwvsQnZ4lIO8zIr8=
+github.com/FlowSeer/fail v0.0.0-20250826093656-d9451a3c28cc/go.mod h1:0TasYGgaPEAKJuXk5jKDo6Dw7pUZ2R7FnX5rFq8HoVQ=
+github.com/FlowSeer/wz v0.0.0-20250825190635-b4a4f3257a2c h1:fqgGASVuNmgE+Ge3bxA9ocpOXejb0X6R/L+Mw0Oppto=
+github.com/FlowSeer/wz v0.0.0-20250825190635-b4a4f3257a2c/go.mod h1:D8h3ijkk92DYQB3GOCn6/ycX4VJXyTvYfczGkPRxyAU=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=

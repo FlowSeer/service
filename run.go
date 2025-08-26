@@ -1,6 +1,18 @@
 package service
 
-import "context"
+import (
+	"context"
+
+	"github.com/FlowSeer/fail"
+	"go.opentelemetry.io/otel/metric"
+	metricNoop "go.opentelemetry.io/otel/metric/noop"
+	metricSdk "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	traceSdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
+)
 
 // Run starts the provided Service by invoking its Run method within the given context.
 // This is a convenience wrapper that runs a single service using the same semantics as RunInParallel.
@@ -38,5 +50,89 @@ func RunInGroup(ctx context.Context, svcs ...Service) error {
 // run is an internal helper function that manages the concurrent execution of one or more Service instances.
 // It is used by both RunInParallel and RunInGroup to implement their respective service orchestration semantics.
 func run(ctx context.Context, grouped bool, svcs []Service) error {
-	panic("not implemented")
+	if len(svcs) == 0 {
+		return nil
+	}
+
+	if len(svcs) == 1 {
+		return runOne(ctx, svcs[0])
+	}
+
+	var eg = &errgroup.Group{}
+	if grouped {
+		eg, ctx = errgroup.WithContext(ctx)
+	}
+
+	for _, svc := range svcs {
+		eg.Go(func() error {
+			return runOne(ctx, svc)
+		})
+	}
+
+	// FIXME: return the errors as documented
+	return eg.Wait()
+}
+
+// runOne is an internal helper function that manages the execution of a single Service instance.
+// It is used by both RunInParallel and RunInGroup to implement their respective service orchestration semantics.
+func runOne(ctx context.Context, svc Service) error {
+	ctx = fail.ContextWithAttributes(ctx, map[string]any{
+		string(semconv.ServiceNameKey):    svc.Name(),
+		string(semconv.ServiceVersionKey): svc.Version(),
+	})
+
+	logLevel := LogLevelFromEnv(svc.Name())
+	logFormat := LogFormatFromEnv(svc.Name())
+	logger := LoggerFromEnv(svc.Name()).
+		With(string(semconv.ServiceNameKey), svc.Name()).
+		With(string(semconv.ServiceVersionKey), svc.Version())
+
+	ctx = WithLogLevel(ctx, logLevel)
+	ctx = WithLogFormat(ctx, logFormat)
+	ctx = WithLogger(ctx, logger)
+
+	var meterProvider metric.MeterProvider = metricNoop.NewMeterProvider()
+	var tracerProvider trace.TracerProvider = traceSdk.NewTracerProvider()
+
+	if IsOtelEnabled(svc.Name()) {
+		res, err := resource.New(ctx, resource.WithAttributes(
+			semconv.ServiceName(svc.Name()),
+			semconv.ServiceVersion(svc.Version()),
+		))
+		if err != nil {
+			return fail.New().
+				Context(ctx).
+				Cause(err).
+				Msg("failed to create resource")
+		}
+
+		tracerProvider = TracerProviderFromEnv(traceSdk.WithResource(res))
+		ctx = WithTracerProvider(ctx, tracerProvider)
+
+		meterProvider = MeterProviderFromEnv(metricSdk.WithResource(res))
+		ctx = WithMeterProvider(ctx, meterProvider)
+	}
+
+	handle := &Handle{
+		ctx:            ctx,
+		logger:         logger,
+		meterProvider:  meterProvider,
+		tracerProvider: tracerProvider,
+	}
+
+	if err := svc.Initialize(handle); err != nil {
+		return fail.New().
+			Context(ctx).
+			Cause(err).
+			Msg("failed to initialize service")
+	}
+
+	if err := svc.Run(handle); err != nil {
+		return fail.New().
+			Context(ctx).
+			Cause(err).
+			Msg("failed to run service")
+	}
+
+	return svc.Shutdown(ctx)
 }
