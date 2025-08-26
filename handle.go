@@ -10,8 +10,12 @@ import (
 
 // Handle provides access to contextual resources for a running service.
 // It encapsulates the context, logger, and OpenTelemetry providers for metrics and tracing.
+//
+// IMPORTANT: A Handle is only valid for a single phase and must not be used in a different one.
+// Each phase should only use the handle received in the handler function.
 type Handle struct {
 	ctx            context.Context
+	phase          Phase
 	logger         *slog.Logger
 	meterProvider  metric.MeterProvider
 	tracerProvider trace.TracerProvider
@@ -21,6 +25,11 @@ type Handle struct {
 // This context is typically used for cancellation and propagation of deadlines.
 func (c *Handle) Context() context.Context {
 	return c.ctx
+}
+
+// Phase returns the current phase of the service.
+func (c *Handle) Phase() Phase {
+	return c.phase
 }
 
 // MeterProvider returns the OpenTelemetry MeterProvider used for metrics instrumentation.

@@ -1,7 +1,5 @@
 package service
 
-import "context"
-
 // Service represents a long-running component with a well-defined lifecycle.
 // It provides methods for initialization, execution, and graceful shutdown,
 // as well as accessors for metadata and current state.
@@ -9,6 +7,8 @@ type Service interface {
 	// Name returns the unique name of the service.
 	// This should be a short, human-readable identifier.
 	Name() string
+	// Namespace returns the namespace of the service.
+	Namespace() string
 	// Version returns the version of the service implementation.
 	// This should be a semantic version (e.g., "1.2.3") or a date-based version (e.g., "2024-06-01").
 	Version() string
@@ -31,5 +31,5 @@ type Service interface {
 	// The provided context can be used to enforce a shutdown deadline or cancellation.
 	// After successful shutdown, the service must transition to the StageFinished state.
 	// If the context is cancelled or times out before shutdown completes, context.Canceled should be returned.
-	Shutdown(ctx context.Context) error
+	Shutdown(*Handle) error
 }

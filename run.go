@@ -77,15 +77,19 @@ func run(ctx context.Context, grouped bool, svcs []Service) error {
 // It is used by both RunInParallel and RunInGroup to implement their respective service orchestration semantics.
 func runOne(ctx context.Context, svc Service) error {
 	ctx = fail.ContextWithAttributes(ctx, map[string]any{
-		string(semconv.ServiceNameKey):    svc.Name(),
-		string(semconv.ServiceVersionKey): svc.Version(),
+		string(semconv.ServiceNameKey):      svc.Name(),
+		string(semconv.ServiceVersionKey):   svc.Version(),
+		string(semconv.ServiceNamespaceKey): svc.Namespace(),
 	})
 
 	logLevel := LogLevelFromEnv(svc.Name())
 	logFormat := LogFormatFromEnv(svc.Name())
 	logger := LoggerFromEnv(svc.Name()).
-		With(string(semconv.ServiceNameKey), svc.Name()).
-		With(string(semconv.ServiceVersionKey), svc.Version())
+		With(
+			string(semconv.ServiceNameKey), svc.Name(),
+			string(semconv.ServiceVersionKey), svc.Version(),
+			string(semconv.ServiceNamespaceKey), svc.Namespace(),
+		)
 
 	ctx = WithLogLevel(ctx, logLevel)
 	ctx = WithLogFormat(ctx, logFormat)
@@ -115,11 +119,14 @@ func runOne(ctx context.Context, svc Service) error {
 
 	handle := &Handle{
 		ctx:            ctx,
-		logger:         logger,
 		meterProvider:  meterProvider,
 		tracerProvider: tracerProvider,
 	}
 
+	handle.phase = PhaseInitializing
+	handle.logger = logger.With(
+		"service.phase", handle.phase.String(),
+	)
 	if err := svc.Initialize(handle); err != nil {
 		return fail.New().
 			Context(ctx).
@@ -127,12 +134,26 @@ func runOne(ctx context.Context, svc Service) error {
 			Msg("failed to initialize service")
 	}
 
-	if err := svc.Run(handle); err != nil {
+	handle.phase = PhaseRunning
+	handle.logger = logger.With(
+		"service.phase", handle.phase.String(),
+	)
+
+	err := svc.Run(handle)
+
+	handle.phase = PhaseShuttingDown
+	handle.logger = logger.With(
+		"service.phase", handle.phase.String(),
+	)
+	shutdownErr := svc.Shutdown(handle)
+
+	if err != nil {
 		return fail.New().
 			Context(ctx).
 			Cause(err).
-			Msg("failed to run service")
+			Associate(shutdownErr).
+			Msg("service failed")
 	}
 
-	return svc.Shutdown(ctx)
+	return fail.Wrap("serviced failed to shutdown cleanly", shutdownErr)
 }
