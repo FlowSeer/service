@@ -2,60 +2,53 @@ package service
 
 import (
 	"context"
-	"log/slog"
-
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 )
 
-// Handle provides access to contextual resources for a running service.
-// It encapsulates the context, logger, and OpenTelemetry providers for metrics and tracing.
-//
-// IMPORTANT: A Handle is only valid for a single phase and must not be used in a different one.
-// Each phase should only use the handle received in the handler function.
+// Handle represents a managed or running service instance within the application.
+// It provides methods to access the service's identity, current state, error status, and to initiate a graceful shutdown.
+// Implementations of Handle are responsible for tracking the lifecycle and metadata of a service.
 type Handle struct {
-	ctx            context.Context
-	phase          Phase
-	logger         *slog.Logger
-	meterProvider  metric.MeterProvider
-	tracerProvider trace.TracerProvider
+	id        string
+	name      string                      // The unique name of the service.
+	namespace string                      // The namespace to which the service belongs.
+	version   string                      // The version string of the service.
+	error     error                       // The last error encountered by the service, or nil if none.
+	phase     Phase                       // The current lifecycle phase/state of the service.
+	shutdown  func(context.Context) error // Function to gracefully shut down the service.
 }
 
-// Context returns the base context associated with the service.
-// This context is typically used for cancellation and propagation of deadlines.
-func (c *Handle) Context() context.Context {
-	return c.ctx
+// Id returns the unique identifier of the service instance.
+func (h *Handle) Id() string {
+	return h.id
 }
 
-// Phase returns the current phase of the service.
-func (c *Handle) Phase() Phase {
-	return c.phase
+// Name returns the unique name of the service instance.
+func (h *Handle) Name() string {
+	return h.name
 }
 
-// MeterProvider returns the OpenTelemetry MeterProvider used for metrics instrumentation.
-func (c *Handle) MeterProvider() metric.MeterProvider {
-	return c.meterProvider
+// Namespace returns the namespace associated with the service instance.
+func (h *Handle) Namespace() string {
+	return h.namespace
 }
 
-// Meter returns a named OpenTelemetry Meter for recording metrics.
-// The name should identify the instrumentation scope.
-func (c *Handle) Meter(name string) metric.Meter {
-	return c.meterProvider.Meter(name)
+// Version returns the version string of the service instance.
+func (h *Handle) Version() string {
+	return h.version
 }
 
-// TracerProvider returns the OpenTelemetry TracerProvider used for distributed tracing.
-func (c *Handle) TracerProvider() trace.TracerProvider {
-	return c.tracerProvider
+// Error returns the most recent error encountered by the service, or nil if no error has occurred.
+func (h *Handle) Error() error {
+	return h.error
 }
 
-// Tracer returns a named OpenTelemetry Tracer for creating spans.
-// The name should identify the instrumentation scope.
-func (c *Handle) Tracer(name string) trace.Tracer {
-	return c.tracerProvider.Tracer(name)
+// Phase returns the current lifecycle phase or state of the service instance.
+func (h *Handle) Phase() Phase {
+	return h.phase
 }
 
-// Logger returns the logger associated with the service.
-// This logger should be used for all structured logging within the service.
-func (c *Handle) Logger() *slog.Logger {
-	return c.logger
+// Shutdown attempts to gracefully shut down the service instance, using the provided context for cancellation and timeout.
+// Returns an error if shutdown fails or if the context is canceled or times out.
+func (h *Handle) Shutdown(ctx context.Context) error {
+	return h.shutdown(ctx)
 }

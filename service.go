@@ -21,15 +21,15 @@ type Service interface {
 	// configuration loading, or dependency checks.
 	// The provided context can be used to cancel initialization early.
 	// Returns an error if initialization fails or is cancelled.
-	Initialize(*Handle) error
+	Initialize(*Context) error
 	// Run starts the main execution loop of the service.
 	// This method should block until the service is stopped, fails, or the context is cancelled.
 	// If the context is cancelled, the service must begin a graceful shutdown.
 	// Returns an error if the service fails or is interrupted.
-	Run(*Handle) error
+	Run(*Context) error
 	// Shutdown gracefully stops the service and releases all resources.
 	// The provided context can be used to enforce a shutdown deadline or cancellation.
 	// After successful shutdown, the service must transition to the StageFinished state.
 	// If the context is cancelled or times out before shutdown completes, context.Canceled should be returned.
-	Shutdown(*Handle) error
+	Shutdown(*Context) error
 }
