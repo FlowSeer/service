@@ -78,13 +78,13 @@ func Run(ctx context.Context, svc Service, opts ...RunnerOption) error {
 func RunAll(ctx context.Context, svcs []Service, opts ...RunnerOption) error {
 	runner := NewRunner(ctx, opts...)
 
-	for _, svc := range svcs {
+	for i, svc := range svcs {
 		_, err := runner.Run(svc)
 
 		if err != nil {
-			shutdownErr := runner.ShutdownAll(ctx)
-			if shutdownErr != nil {
-				err = fail.WithAssociated(err, shutdownErr)
+			// If we already added services, we need to shut them down before returning.
+			if i > 0 {
+				err = fail.WithAssociated(err, runner.ShutdownAll(ctx))
 			}
 
 			return err
@@ -115,11 +115,9 @@ type DefaultRunner struct {
 	opts RunnerOptions
 	ctx  context.Context
 
-	serviceHandles    map[string]*Handle
-	serviceHandlesMtx sync.RWMutex
-
-	services    map[string]Service
-	servicesMtx sync.RWMutex
+	services       map[string]Service
+	serviceHandles map[string]*Handle
+	servicesMtx    sync.RWMutex
 }
 
 func (r *DefaultRunner) Run(svc Service) (*Handle, error) {
@@ -127,7 +125,7 @@ func (r *DefaultRunner) Run(svc Service) (*Handle, error) {
 }
 
 func (r *DefaultRunner) Shutdown(ctx context.Context, h *Handle) error {
-	panic("not implemented")
+	return r.shutdownAndRemove(ctx, h.Id())
 }
 
 func (r *DefaultRunner) ShutdownAll(ctx context.Context) error {
@@ -136,4 +134,23 @@ func (r *DefaultRunner) ShutdownAll(ctx context.Context) error {
 
 func (r *DefaultRunner) Wait(ctx context.Context) error {
 	panic("not implemented")
+}
+
+func (r *DefaultRunner) shutdownAndRemove(ctx context.Context, id string) error {
+	r.servicesMtx.RLock()
+	handle := r.serviceHandles[id]
+	r.servicesMtx.RUnlock()
+
+	if handle == nil {
+		return nil
+	}
+
+	err := r.Shutdown(ctx, handle)
+
+	r.servicesMtx.Lock()
+	delete(r.serviceHandles, id)
+	delete(r.services, id)
+	r.servicesMtx.Unlock()
+
+	return err
 }
