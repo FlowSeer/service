@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/FlowSeer/fail"
 )
@@ -20,9 +23,8 @@ type Runner interface {
 	// Returns an error if shutdown fails or if the context is canceled or times out.
 	Shutdown(ctx context.Context, h *Handle) error
 
-	// ShutdownAll attempts to gracefully shut down all managed services using the provided context.
-	// Returns an error if any service fails to shut down or if the context is canceled or times out.
-	ShutdownAll(ctx context.Context) error
+	// Stop running any new service and shut down all already-running services.
+	Stop(ctx context.Context) error
 
 	// Wait blocks until all managed services have fully stopped or the context is canceled.
 	// The runner must not accept new service requests after a call to Wait has been made.
@@ -84,7 +86,7 @@ func RunAll(ctx context.Context, svcs []Service, opts ...RunnerOption) error {
 		if err != nil {
 			// If we already added services, we need to shut them down before returning.
 			if i > 0 {
-				err = fail.WithAssociated(err, runner.ShutdownAll(ctx))
+				err = fail.WithAssociated(err, runner.Stop(ctx))
 			}
 
 			return err
@@ -118,21 +120,47 @@ type DefaultRunner struct {
 	services       map[string]Service
 	serviceHandles map[string]*Handle
 	servicesMtx    sync.RWMutex
+
+	stopping atomic.Bool
 }
 
 func (r *DefaultRunner) Run(svc Service) (*Handle, error) {
-	panic("not implemented")
+	handle := &Handle{
+		id:        fmt.Sprintf("%s/%s@%s-%d", svc.Namespace(), svc.Name(), svc.Version(), time.Now().UnixNano()),
+		name:      svc.Name(),
+		namespace: svc.Namespace(),
+		version:   svc.Version(),
+		phase:     PhaseWaiting,
+	}
+	handle.shutdown = func(ctx context.Context) error {
+		return r.Shutdown(ctx, handle)
+	}
+
+	r.servicesMtx.Lock()
+	r.services[handle.id] = svc
+	r.serviceHandles[handle.id] = handle
+	r.servicesMtx.Unlock()
+
+	return handle, r.run(r.ctx, svc, handle)
 }
 
 func (r *DefaultRunner) Shutdown(ctx context.Context, h *Handle) error {
 	return r.shutdownAndRemove(ctx, h.Id())
 }
 
-func (r *DefaultRunner) ShutdownAll(ctx context.Context) error {
-	panic("not implemented")
+func (r *DefaultRunner) Stop(ctx context.Context) error {
+	if r.stopping.Swap(true) {
+		return ErrServiceAlreadyStopped
+	}
+
+	return nil
 }
 
 func (r *DefaultRunner) Wait(ctx context.Context) error {
+	panic("not implemented")
+}
+
+func (r *DefaultRunner) run(ctx context.Context, svc Service, handle *Handle) error {
 	panic("not implemented")
 }
 
