@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 )
 
 // Handle represents a managed or running service instance within the application.
@@ -15,6 +16,14 @@ type Handle struct {
 	error     error                       // The last error encountered by the service, or nil if none.
 	phase     Phase                       // The current lifecycle phase/state of the service.
 	shutdown  func(context.Context) error // Function to gracefully shut down the service.
+}
+
+func (h *Handle) String() string {
+	if h.namespace != "" {
+		return fmt.Sprintf("%s/%s @ %s", h.Namespace(), h.Name(), h.Version())
+	}
+
+	return fmt.Sprintf("%s @ %s", h.Name(), h.Version())
 }
 
 // Id returns the unique identifier of the service instance.

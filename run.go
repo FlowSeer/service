@@ -126,7 +126,7 @@ type DefaultRunner struct {
 
 func (r *DefaultRunner) Run(svc Service) (*Handle, error) {
 	handle := &Handle{
-		id:        fmt.Sprintf("%s/%s@%s-%d", svc.Namespace(), svc.Name(), svc.Version(), time.Now().UnixNano()),
+		id:        fmt.Sprintf("%s/%s@%s-T%d", svc.Namespace(), svc.Name(), svc.Version(), time.Now().UnixNano()),
 		name:      svc.Name(),
 		namespace: svc.Namespace(),
 		version:   svc.Version(),
