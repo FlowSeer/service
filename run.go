@@ -36,6 +36,8 @@ type RunnerOptions struct {
 	// If true, the runner will immediately return an error if any service fails.
 	// If false, the runner will continue running all services and return an error only after all services have exited.
 	AllOrNothing bool
+	// ExitOnError determines whether to exit the process if any service fails.
+	ExitOnError bool
 }
 
 // RunnerOption is a function that modifies RunnerOptions.
@@ -48,6 +50,17 @@ type RunnerOption func(*RunnerOptions)
 func WithAllOrNothing() RunnerOption {
 	return func(opts *RunnerOptions) {
 		opts.AllOrNothing = true
+	}
+}
+
+// WithExitOnError returns a RunnerOption that sets the ExitOnError field of RunnerOptions.
+// If exitOnError is true, the runner will exit the process if it fails.
+// If AllOrNothing is true, the runner will exit the process if any service fails. Otherwise,
+// the runner will continue running all services and exit the process only after all services have exited.
+// The exit code is determined by the fail.ExitCode function.
+func WithExitOnError() RunnerOption {
+	return func(opts *RunnerOptions) {
+		opts.ExitOnError = true
 	}
 }
 
