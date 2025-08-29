@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	OtelEnableEnvVar       = "OTEL_ENABLED"
 	InstrumentationName    = "github.com/FlowSeer/service"
 	InstrumentationVersion = "0.0.1"
 )
@@ -102,9 +103,9 @@ func MeterProviderFromEnv(opts ...metricSdk.Option) metric.MeterProvider {
 }
 
 // IsOtelEnabled checks whether OpenTelemetry instrumentation is enabled by looking for an
-// environment variable named {PREFIX}_OTEL_ENABLED (normalized using envName).
+// environment variable named {PREFIX}_OTEL_ENABLED (normalized using EnvName).
 // Returns true if the variable is set, false otherwise.
 func IsOtelEnabled(prefix string) bool {
-	_, ok := os.LookupEnv(envName(prefix, "OTEL_ENABLED"))
+	_, ok := os.LookupEnv(EnvName(prefix, OtelEnableEnvVar))
 	return ok
 }

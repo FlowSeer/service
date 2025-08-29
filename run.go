@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 
@@ -14,7 +15,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 	traceNoop "go.opentelemetry.io/otel/trace/noop"
-	"golang.org/x/sync/errgroup"
 )
 
 // RunAndExit runs the given service using the provided context, waits for it to finish,
@@ -130,31 +130,35 @@ func Run(ctx context.Context, svc Service) *Handle {
 // a slice of Handles, one for each service. The services are run independently and are not
 // canceled if any other service fails.
 func RunParallel(ctx context.Context, svcs ...Service) []*Handle {
-	return runAll(ctx, nil, svcs)
+	return runAll(ctx, false, svcs)
 }
 
 // RunGroup runs multiple services as a group using the provided context and returns
 // a slice of Handles, one for each service. If any service returns an error, the context
 // is canceled for all services in the group.
 func RunGroup(ctx context.Context, svcs ...Service) []*Handle {
-	// The derived context will be canceled when the first error is returned from any goroutine
-	eg, ctx := errgroup.WithContext(ctx)
-	return runAll(ctx, eg, svcs)
+	return runAll(ctx, true, svcs)
 }
 
 // runAll runs the services using the provided context and error group.
 // If wg is a nil *errgroup.Group, services are run in parallel without group cancellation.
 // If wg is a non-nil *errgroup.Group, services are run as a group and the context is canceled
 // if any service returns an error. Returns a slice of Handles for the running services.
-func runAll(ctx context.Context, eg *errgroup.Group, svcs []Service) []*Handle {
+func runAll(ctx context.Context, grouped bool, svcs []Service) []*Handle {
+	ctx, cancel := context.WithCancel(ctx)
+	sig := make(chan struct{}, 1)
+
+	go func() {
+		<-sig
+
+		if grouped {
+			cancel()
+		}
+	}()
+
 	handles := make([]*Handle, len(svcs))
 	for i, svc := range svcs {
-		eg.Go(func() error {
-			h := run(ctx, svc)
-			handles[i] = h
-
-			return h.Wait()
-		})
+		handles[i] = run(ctx, svc)
 	}
 
 	return handles
@@ -162,7 +166,6 @@ func runAll(ctx context.Context, eg *errgroup.Group, svcs []Service) []*Handle {
 
 // run runs the given service using the provided context and returns a Handle
 // that can be used to wait for the service to finish or to shut it down.
-// This function does not block.
 func run(ctx context.Context, svc Service) *Handle {
 	svcCtx, err := createContext(ctx, svc)
 	if err != nil {
@@ -171,13 +174,21 @@ func run(ctx context.Context, svc Service) *Handle {
 
 	handle := createHandle(svc, svcCtx)
 
-	// TODO: actually run the service
+	_ = svc.Run(svcCtx)
+	_ = svc.Shutdown(svcCtx)
+	close(handle.exitSig)
 
 	return handle
 }
 
 func createContext(ctx context.Context, svc Service) (*Context, error) {
-	logger := LoggerFromEnv(svc.Name())
+	logger := LoggerFromEnv(svc.Name()).
+		With("service.name", svc.Name(),
+			"service.version", svc.Version())
+	if svc.Namespace() != "" {
+		logger = logger.With("service.namespace", svc.Namespace())
+	}
+
 	ctx = WithLogger(ctx, logger)
 
 	var (
@@ -198,6 +209,11 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 
 		meterProvider = MeterProviderFromEnv(metricSdk.WithResource(res))
 	} else {
+		logger.Warn(fmt.Sprintf(
+			"OTEL instrumentation is disabled. It must be opted in explicitly by setting the %s environment variable to a non-empty value.",
+			EnvName(svc.Name(), OtelEnableEnvVar)),
+		)
+
 		tracerProvider = traceNoop.NewTracerProvider()
 		meterProvider = metricNoop.NewMeterProvider()
 	}

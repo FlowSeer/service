@@ -47,7 +47,7 @@ func LogLevel(ctx context.Context) slog.Leveler {
 // Valid values are: "debug", "info", "warn", "error" (case-insensitive).
 // Returns slog.LevelInfo as the default if no valid level is found.
 func LogLevelFromEnv(prefix string) slog.Leveler {
-	switch strings.ToLower(os.Getenv(envName(prefix, "LOG_LEVEL"))) {
+	switch strings.ToLower(os.Getenv(EnvName(prefix, "LOG_LEVEL"))) {
 	case "debug":
 		return slog.LevelDebug
 	case "info":
@@ -87,7 +87,7 @@ func LogFormatFromEnv(prefix string) LogFormat {
 		}
 	}
 
-	switch strings.ToLower(os.Getenv(envName(prefix, "LOG_FORMAT"))) {
+	switch strings.ToLower(os.Getenv(EnvName(prefix, "LOG_FORMAT"))) {
 	case "text", "pretty", "console":
 		return LogFormatText
 	case "json", "structured":

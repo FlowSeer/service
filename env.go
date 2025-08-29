@@ -5,17 +5,18 @@ import (
 	"strings"
 )
 
-// envName constructs a normalized environment variable name by combining a prefix and a name.
+// EnvName constructs a normalized environment variable name by combining a prefix and a name.
 // If the prefix is empty, it defaults to "SERVICE_".
 // If the prefix does not end with an underscore, one is appended.
-// The resulting string (prefix + name) is then normalized to conform to environment variable naming conventions
-// using normalizeEnvName, which ensures uppercase, replaces invalid characters, collapses underscores, etc.
+// The resulting string (prefix + name) is then normalized using NormalizeEnvName.
 //
 // Example usage:
 //
-//	envName("MYAPP", "LOG_LEVEL")   // returns "MYAPP_LOG_LEVEL"
-//	envName("", "CONFIG_PATH")      // returns "SERVICE_CONFIG_PATH"
-func envName(prefix string, name string) string {
+//		EnvName("MYAPP", "LOG_LEVEL")   	// returns "MYAPP_LOG_LEVEL"
+//		EnvName("", "CONFIG_PATH")      	// returns "SERVICE_CONFIG_PATH"
+//	    EnvName("MYAPP_", "0config-dtest") 	// returns "MYAPP_CONFIG_TEST"
+//	    EnvName("0APP", "config") 			// returns "_0APP_CONFIG"
+func EnvName(prefix string, name string) string {
 	if prefix == "" {
 		prefix = "SERVICE_"
 	} else {
@@ -24,10 +25,10 @@ func envName(prefix string, name string) string {
 		}
 	}
 
-	return normalizeEnvName(prefix + name)
+	return NormalizeEnvName(prefix + name)
 }
 
-// normalizeEnvName transforms an input string into a valid, conventional environment variable name.
+// NormalizeEnvName transforms an input string into a valid, conventional environment variable name.
 // The normalization process performs the following steps:
 //  1. Converts the input to uppercase for conventional env var style.
 //  2. Replaces any character that is not an uppercase letter, digit, or underscore with an underscore.
@@ -41,7 +42,7 @@ func envName(prefix string, name string) string {
 //	"test@123" → "TEST_123"
 //	"1st-place" → "_1ST_PLACE"
 //	"hello__world" → "HELLO_WORLD"
-func normalizeEnvName(name string) string {
+func NormalizeEnvName(name string) string {
 	if name == "" {
 		return name
 	}

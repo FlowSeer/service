@@ -136,9 +136,11 @@ func createErrorHandle(svc Service, err error) *Handle {
 		namespace: svc.Namespace(),
 		version:   svc.Version(),
 		err:       err,
+		exitSig:   make(chan struct{}),
 	}
 	// call with noop to forbid double-shutdown
 	h.shutdownOnce.Do(func() {})
+	close(h.exitSig)
 
 	return h
 }

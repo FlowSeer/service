@@ -1,0 +1,54 @@
+package main
+
+import (
+	"time"
+
+	"github.com/FlowSeer/service"
+)
+
+const (
+	serviceName      = "example"
+	serviceVersion   = "0.0.1"
+	serviceNamespace = "FlowSeer"
+)
+
+type exampleService struct{}
+
+func (e exampleService) Name() string {
+	return serviceName
+}
+
+func (e exampleService) Namespace() string {
+	return serviceNamespace
+}
+
+func (e exampleService) Version() string {
+	return serviceVersion
+}
+
+func (e exampleService) Health() service.Health {
+	return service.Health{
+		Status: service.HealthStatusUnknown,
+	}
+}
+
+func (e exampleService) Error() error {
+	return nil
+}
+
+func (e exampleService) Initialize(ctx *service.Context) error {
+	ctx.Info("Initializing service...")
+	return nil
+}
+
+func (e exampleService) Run(ctx *service.Context) error {
+	ctx.Info("Sleeping for 10 seconds...")
+	time.Sleep(10 * time.Second)
+	ctx.Info("Done sleeping.")
+	return nil
+}
+
+func (e exampleService) Shutdown(ctx *service.Context) error {
+	ctx.Info("Shutting down service...")
+	return nil
+}
