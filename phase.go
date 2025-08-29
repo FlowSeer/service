@@ -12,7 +12,7 @@ const (
 	PhaseInitializing
 	// PhaseRunning indicates the service is currently running.
 	PhaseRunning
-	// PhaseShuttingDown indicates the service is in the process of stopping.
+	// PhaseShuttingDown indicates the service is in the process of stopped.
 	PhaseShuttingDown
 	// PhaseFinished indicates the service has finished successfully.
 	PhaseFinished

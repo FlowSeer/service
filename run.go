@@ -2,183 +2,221 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/FlowSeer/fail"
+	"go.opentelemetry.io/otel/metric"
+	metricNoop "go.opentelemetry.io/otel/metric/noop"
+	metricSdk "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	traceSdk "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"go.opentelemetry.io/otel/trace"
+	traceNoop "go.opentelemetry.io/otel/trace/noop"
+	"golang.org/x/sync/errgroup"
 )
 
-// Runner manages the lifecycle of one or more Service instances.
-// It provides methods to start, shut down, and wait for services, either individually or collectively.
-// Implementations of Runner are responsible for orchestrating service execution, graceful shutdown, and error handling.
-type Runner interface {
-	// Run starts the given Service and returns a Handle for the running service,
-	// along with any error encountered during startup.
-	// The same service may be started multiple times, and the service implementation must make sure to handle this.
-	Run(svc Service) (*Handle, error)
-
-	// Shutdown attempts to gracefully shut down the specified service Handle using the provided context.
-	// Returns an error if shutdown fails or if the context is canceled or times out.
-	Shutdown(ctx context.Context, h *Handle) error
-
-	// Stop running any new service and shut down all already-running services.
-	Stop(ctx context.Context) error
-
-	// Wait blocks until all managed services have fully stopped or the context is canceled.
-	// The runner must not accept new service requests after a call to Wait has been made.
-	// Returns an error if waiting fails or the context is canceled or times out.
-	Wait(ctx context.Context) error
-}
-
-// RunnerOptions configures the behavior of a Runner.
-type RunnerOptions struct {
-	// AllOrNothing determines whether to abort all services if any service fails.
-	// If true, the runner will immediately return an error if any service fails.
-	// If false, the runner will continue running all services and return an error only after all services have exited.
-	AllOrNothing bool
-	// ExitOnError determines whether to exit the process if any service fails.
-	ExitOnError bool
-}
-
-// RunnerOption is a function that modifies RunnerOptions.
-// It is used to configure optional behaviors for a Runner at creation time.
-type RunnerOption func(*RunnerOptions)
-
-// WithAllOrNothing returns a RunnerOption that sets the AllOrNothing field of RunnerOptions.
-// If allOrNothing is true, the runner will abort all services if any service fails.
-// If false, the runner will allow all services to run to completion, even if some fail.
-func WithAllOrNothing() RunnerOption {
-	return func(opts *RunnerOptions) {
-		opts.AllOrNothing = true
+// RunAndExit runs the given service using the provided context, waits for it to finish,
+// and then exits the process with an appropriate exit code based on the error returned.
+// If the service completes successfully, the process exits with code 0.
+// If an error occurs, the process exits with the code returned by fail.ExitCode(err).
+func RunAndExit(ctx context.Context, svc Service) {
+	err := RunAndWait(ctx, svc)
+	if err != nil {
+		os.Exit(fail.ExitCode(err))
+	} else {
+		os.Exit(0)
 	}
 }
 
-// WithExitOnError returns a RunnerOption that sets the ExitOnError field of RunnerOptions.
-// If exitOnError is true, the runner will exit the process if it fails.
-// If AllOrNothing is true, the runner will exit the process if any service fails. Otherwise,
-// the runner will continue running all services and exit the process only after all services have exited.
-// The exit code is determined by the fail.ExitCode function.
-func WithExitOnError() RunnerOption {
-	return func(opts *RunnerOptions) {
-		opts.ExitOnError = true
-	}
-}
+// RunParallelAndExit runs multiple services in parallel using the provided context,
+// waits for all of them to finish, and then exits the process with the highest exit code
+// among all returned errors. If all services complete successfully, the process exits with code 0.
+func RunParallelAndExit(ctx context.Context, svcs ...Service) {
+	errs := RunParallelAndWait(ctx, svcs...)
 
-// Run starts the provided Service by invoking its Run method within the given context.
-// This is a convenience wrapper that runs a single service using the same semantics as RunAll.
-// It blocks until the service completes or the context is canceled.
-// The returned error is the result of the service's Run method or context cancellation.
-func Run(ctx context.Context, svc Service, opts ...RunnerOption) error {
-	return RunAll(ctx, []Service{svc}, opts...)
-}
-
-// RunAll starts all provided services using a new Runner configured with the given options.
-// It blocks until all services complete or the context is canceled.
-// Returns an error if any service fails to start or if waiting fails.
-func RunAll(ctx context.Context, svcs []Service, opts ...RunnerOption) error {
-	runner := NewRunner(ctx, opts...)
-
-	for i, svc := range svcs {
-		_, err := runner.Run(svc)
-
-		if err != nil {
-			// If we already added services, we need to shut them down before returning.
-			if i > 0 {
-				err = fail.WithAssociated(err, runner.Stop(ctx))
-			}
-
-			return err
-		}
+	exitCode := 0
+	for _, err := range errs {
+		exitCode = max(exitCode, fail.ExitCode(err))
 	}
 
-	return runner.Wait(ctx)
+	os.Exit(exitCode)
 }
 
-// NewRunner creates a new DefaultRunner with the provided context and options.
-func NewRunner(ctx context.Context, opts ...RunnerOption) Runner {
-	options := RunnerOptions{}
+// RunGroupAndExit runs multiple services as a group using the provided context,
+// where the group is canceled if any service returns an error. It waits for all services
+// to finish and then exits the process with the highest exit code among all returned errors.
+// If all services complete successfully, the process exits with code 0.
+func RunGroupAndExit(ctx context.Context, svcs ...Service) {
+	errs := RunGroupAndWait(ctx, svcs...)
 
-	for _, opt := range opts {
-		opt(&options)
+	exitCode := 0
+	for _, err := range errs {
+		exitCode = max(exitCode, fail.ExitCode(err))
 	}
 
-	return &DefaultRunner{
-		opts:           options,
-		ctx:            ctx,
-		serviceHandles: make(map[string]*Handle),
-		services:       make(map[string]Service),
-	}
+	os.Exit(exitCode)
 }
 
-// DefaultRunner is a basic implementation of the Runner interface.
-type DefaultRunner struct {
-	opts RunnerOptions
-	ctx  context.Context
-
-	services       map[string]Service
-	serviceHandles map[string]*Handle
-	servicesMtx    sync.RWMutex
-
-	stopping atomic.Bool
+// RunAndWait runs the given service using the provided context and waits for it to finish.
+// It returns the error returned by the service, or nil if the service completes successfully.
+func RunAndWait(ctx context.Context, svc Service) error {
+	return Run(ctx, svc).Wait()
 }
 
-func (r *DefaultRunner) Run(svc Service) (*Handle, error) {
-	handle := &Handle{
-		id:        fmt.Sprintf("%s/%s@%s-T%d", svc.Namespace(), svc.Name(), svc.Version(), time.Now().UnixNano()),
-		name:      svc.Name(),
-		namespace: svc.Namespace(),
-		version:   svc.Version(),
-		phase:     PhaseWaiting,
-	}
-	handle.shutdown = func(ctx context.Context) error {
-		return r.Shutdown(ctx, handle)
-	}
-
-	r.servicesMtx.Lock()
-	r.services[handle.id] = svc
-	r.serviceHandles[handle.id] = handle
-	r.servicesMtx.Unlock()
-
-	return handle, r.run(r.ctx, svc, handle)
-}
-
-func (r *DefaultRunner) Shutdown(ctx context.Context, h *Handle) error {
-	return r.shutdownAndRemove(ctx, h.Id())
-}
-
-func (r *DefaultRunner) Stop(ctx context.Context) error {
-	if r.stopping.Swap(true) {
-		return ErrServiceAlreadyStopped
-	}
-
-	return nil
-}
-
-func (r *DefaultRunner) Wait(ctx context.Context) error {
-	panic("not implemented")
-}
-
-func (r *DefaultRunner) run(ctx context.Context, svc Service, handle *Handle) error {
-	panic("not implemented")
-}
-
-func (r *DefaultRunner) shutdownAndRemove(ctx context.Context, id string) error {
-	r.servicesMtx.RLock()
-	handle := r.serviceHandles[id]
-	r.servicesMtx.RUnlock()
-
-	if handle == nil {
+// RunParallelAndWait runs multiple services in parallel using the provided context,
+// waits for all of them to finish, and returns a slice of errors corresponding to each service.
+// If a service completes successfully, its error will be nil.
+func RunParallelAndWait(ctx context.Context, svcs ...Service) []error {
+	switch len(svcs) {
+	case 0:
 		return nil
+	case 1:
+		return []error{RunAndWait(ctx, svcs[0])}
 	}
 
-	err := r.Shutdown(ctx, handle)
+	wg := sync.WaitGroup{}
+	handles := RunParallel(ctx, svcs...)
+	errs := make([]error, len(handles))
+	for i, h := range handles {
+		wg.Add(1)
 
-	r.servicesMtx.Lock()
-	delete(r.serviceHandles, id)
-	delete(r.services, id)
-	r.servicesMtx.Unlock()
+		go func(h *Handle) {
+			defer wg.Done()
+			errs[i] = h.Wait()
+		}(h)
+	}
 
-	return err
+	wg.Wait()
+	return errs
+}
+
+// RunGroupAndWait runs multiple services as a group using the provided context,
+// where the group is canceled if any service returns an error. It waits for all services
+// to finish and returns a slice of errors corresponding to each service.
+// If a service completes successfully, its error will be nil.
+func RunGroupAndWait(ctx context.Context, svcs ...Service) []error {
+	switch len(svcs) {
+	case 0:
+		return nil
+	case 1:
+		return []error{RunAndWait(ctx, svcs[0])}
+	}
+
+	wg := sync.WaitGroup{}
+	handles := RunGroup(ctx, svcs...)
+	errs := make([]error, len(handles))
+	for i, h := range handles {
+		wg.Add(1)
+
+		go func(h *Handle) {
+			defer wg.Done()
+			errs[i] = h.Wait()
+		}(h)
+	}
+
+	wg.Wait()
+	return errs
+}
+
+// Run runs the given service using the provided context and returns a Handle
+// that can be used to wait for the service to finish or to shut it down.
+func Run(ctx context.Context, svc Service) *Handle {
+	return RunParallel(ctx, svc)[0]
+}
+
+// RunParallel runs multiple services in parallel using the provided context and returns
+// a slice of Handles, one for each service. The services are run independently and are not
+// canceled if any other service fails.
+func RunParallel(ctx context.Context, svcs ...Service) []*Handle {
+	return runAll(ctx, nil, svcs)
+}
+
+// RunGroup runs multiple services as a group using the provided context and returns
+// a slice of Handles, one for each service. If any service returns an error, the context
+// is canceled for all services in the group.
+func RunGroup(ctx context.Context, svcs ...Service) []*Handle {
+	// The derived context will be canceled when the first error is returned from any goroutine
+	eg, ctx := errgroup.WithContext(ctx)
+	return runAll(ctx, eg, svcs)
+}
+
+// runAll runs the services using the provided context and error group.
+// If wg is a nil *errgroup.Group, services are run in parallel without group cancellation.
+// If wg is a non-nil *errgroup.Group, services are run as a group and the context is canceled
+// if any service returns an error. Returns a slice of Handles for the running services.
+func runAll(ctx context.Context, eg *errgroup.Group, svcs []Service) []*Handle {
+	handles := make([]*Handle, len(svcs))
+	for i, svc := range svcs {
+		eg.Go(func() error {
+			h := run(ctx, svc)
+			handles[i] = h
+
+			return h.Wait()
+		})
+	}
+
+	return handles
+}
+
+// run runs the given service using the provided context and returns a Handle
+// that can be used to wait for the service to finish or to shut it down.
+// This function does not block.
+func run(ctx context.Context, svc Service) *Handle {
+	svcCtx, err := createContext(ctx, svc)
+	if err != nil {
+		return createErrorHandle(svc, err)
+	}
+
+	handle := createHandle(svc, svcCtx)
+
+	// TODO: actually run the service
+
+	return handle
+}
+
+func createContext(ctx context.Context, svc Service) (*Context, error) {
+	logger := LoggerFromEnv(svc.Name())
+	ctx = WithLogger(ctx, logger)
+
+	var (
+		tracerProvider trace.TracerProvider
+		meterProvider  metric.MeterProvider
+	)
+	if IsOtelEnabled(svc.Name()) {
+		res, err := resource.New(ctx, resource.WithAttributes(
+			semconv.ServiceName(svc.Name()),
+			semconv.ServiceVersion(svc.Version()),
+			semconv.ServiceNamespace(svc.Namespace()),
+		))
+		if err != nil {
+			return nil, fail.Wrap("failed to create OTEL resource", err)
+		}
+
+		tracerProvider = TracerProviderFromEnv(traceSdk.WithResource(res))
+
+		meterProvider = MeterProviderFromEnv(metricSdk.WithResource(res))
+	} else {
+		tracerProvider = traceNoop.NewTracerProvider()
+		meterProvider = metricNoop.NewMeterProvider()
+	}
+
+	ctx = WithTracerProvider(ctx, tracerProvider)
+	ctx = WithMeterProvider(ctx, meterProvider)
+
+	tracer := tracerProvider.Tracer(InstrumentationName, trace.WithInstrumentationVersion(InstrumentationVersion))
+	ctx = WithTracer(ctx, tracer)
+
+	meter := meterProvider.Meter(InstrumentationName, metric.WithInstrumentationVersion(InstrumentationVersion))
+	ctx = WithMeter(ctx, meter)
+
+	return &Context{
+		Context:        ctx,
+		logger:         logger,
+		tracerProvider: tracerProvider,
+		meterProvider:  meterProvider,
+		defaultTracer:  tracer,
+		defaultMeter:   meter,
+	}, nil
 }
