@@ -15,6 +15,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 	traceNoop "go.opentelemetry.io/otel/trace/noop"
+	"golang.org/x/sync/errgroup"
 )
 
 // RunAndExit runs the given service using the provided context, waits for it to finish,
@@ -24,6 +25,7 @@ import (
 func RunAndExit(ctx context.Context, svc Service) {
 	err := RunAndWait(ctx, svc)
 	if err != nil {
+		println(fail.PrintPretty(err))
 		os.Exit(fail.ExitCode(err))
 	} else {
 		os.Exit(0)
@@ -141,24 +143,16 @@ func RunGroup(ctx context.Context, svcs ...Service) []*Handle {
 }
 
 // runAll runs the services using the provided context and error group.
-// If wg is a nil *errgroup.Group, services are run in parallel without group cancellation.
-// If wg is a non-nil *errgroup.Group, services are run as a group and the context is canceled
 // if any service returns an error. Returns a slice of Handles for the running services.
 func runAll(ctx context.Context, grouped bool, svcs []Service) []*Handle {
-	ctx, cancel := context.WithCancel(ctx)
-	sig := make(chan struct{}, 1)
-
-	go func() {
-		<-sig
-
-		if grouped {
-			cancel()
-		}
-	}()
+	eg := &errgroup.Group{} // empty group is valid and implies no cancellation on error
+	if grouped {
+		eg, ctx = errgroup.WithContext(ctx)
+	}
 
 	handles := make([]*Handle, len(svcs))
 	for i, svc := range svcs {
-		handles[i] = run(ctx, svc)
+		handles[i] = run(ctx, eg, svc)
 	}
 
 	return handles
@@ -166,22 +160,35 @@ func runAll(ctx context.Context, grouped bool, svcs []Service) []*Handle {
 
 // run runs the given service using the provided context and returns a Handle
 // that can be used to wait for the service to finish or to shut it down.
-func run(ctx context.Context, svc Service) *Handle {
+// The service is being run in parallel using the provided error group.
+func run(ctx context.Context, eg *errgroup.Group, svc Service) *Handle {
 	svcCtx, err := createContext(ctx, svc)
 	if err != nil {
 		return createErrorHandle(svc, err)
 	}
 
 	handle := createHandle(svc, svcCtx)
+	eg.Go(func() error {
+		svcErr := runInner(svcCtx, handle)
+		handle.setStopped(svcErr)
 
-	_ = svc.Run(svcCtx)
-	_ = svc.Shutdown(svcCtx)
-	close(handle.exitSig)
+		return svcErr
+	})
 
 	return handle
 }
 
+func runInner(ctx *Context, handle *Handle) error {
+	return fail.New().Context(ctx).Msg("not implemented")
+}
+
 func createContext(ctx context.Context, svc Service) (*Context, error) {
+	ctx = fail.ContextWithAttributes(ctx, map[string]any{
+		"service.name":      svc.Name(),
+		"service.version":   svc.Version(),
+		"service.namespace": svc.Namespace(),
+	})
+
 	logger := LoggerFromEnv(svc.Name()).
 		With("service.name", svc.Name(),
 			"service.version", svc.Version())
@@ -202,7 +209,7 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 			semconv.ServiceNamespace(svc.Namespace()),
 		))
 		if err != nil {
-			return nil, fail.Wrap("failed to create OTEL resource", err)
+			return nil, fail.Wrap(err, "failed to create OTEL resource")
 		}
 
 		tracerProvider = TracerProviderFromEnv(traceSdk.WithResource(res))

@@ -88,6 +88,11 @@ func (h *Handle) Shutdown(ctx context.Context) error {
 	return h.Wait()
 }
 
+func (h *Handle) setStopped(err error) {
+	h.setError(err)
+	close(h.exitSig)
+}
+
 func (h *Handle) getPhase() Phase {
 	h.phaseMtx.RLock()
 	defer h.phaseMtx.RUnlock()
@@ -150,9 +155,9 @@ func createHandle(svc Service, svcContext *Context) *Handle {
 		name:      svc.Name(),
 		namespace: svc.Namespace(),
 		version:   svc.Version(),
+		exitSig:   make(chan struct{}),
 		shutdownFunc: func(ctx context.Context) error {
 			return svc.Shutdown(svcContext)
 		},
-		exitSig: make(chan struct{}),
 	}
 }
