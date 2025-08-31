@@ -16,10 +16,6 @@ type Service interface {
 	Version() string
 	// Health returns the current health status of the service.
 	Health() Health
-	// Error returns the terminal error that caused the service to stop, if any.
-	// If the service is still running or has completed successfully (i.e., without error), Error returns nil.
-	// This method is intended for post-mortem inspection of service failures and should not be used for real-time error handling.
-	Error() error
 	// Initialize prepares the service for execution.
 	// This method should be called before Run, and may perform setup such as resource allocation,
 	// configuration loading, or dependency checks.
