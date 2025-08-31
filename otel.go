@@ -125,8 +125,11 @@ func MeterProviderFromEnv(ctx context.Context, opts ...metricSdk.Option) (metric
 			Msg("failed to create OTEL metric exporter")
 	}
 
+	//runtimeReader := metricSdk.NewManualReader(metricSdk.WithProducer(runtime.NewProducer()))
+
 	return metricSdk.NewMeterProvider(append(opts,
 		metricSdk.WithReader(reader),
+		//metricSdk.WithReader(runtimeReader),
 	)...), reader.Shutdown, nil
 }
 

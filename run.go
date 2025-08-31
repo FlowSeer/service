@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/FlowSeer/fail"
+	"go.opentelemetry.io/contrib/instrumentation/host"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel/metric"
 	metricNoop "go.opentelemetry.io/otel/metric/noop"
 	metricSdk "go.opentelemetry.io/otel/sdk/metric"
@@ -241,6 +243,16 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 		meterProvider, meterShutdown, err = MeterProviderFromEnv(ctx, metricSdk.WithResource(res))
 		if err != nil {
 			return nil, fail.Wrap(err, "failed to create OTEL meter provider")
+		}
+
+		err = runtime.Start(runtime.WithMeterProvider(meterProvider))
+		if err != nil {
+			return nil, fail.Wrap(err, "failed to start collection of runtime metrics")
+		}
+
+		err = host.Start(host.WithMeterProvider(meterProvider))
+		if err != nil {
+			return nil, fail.Wrap(err, "failed to start collection of host metrics")
 		}
 	} else {
 		logger.Warn(fmt.Sprintf(
