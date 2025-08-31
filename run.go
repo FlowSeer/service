@@ -182,19 +182,30 @@ func run(ctx context.Context, eg *errgroup.Group, svc Service) *Handle {
 
 func runBlocking(ctx *Context, svc Service, handle *Handle) error {
 	ctx.Logger().Debug("Initializing")
+	handle.setPhase(PhaseInitializing)
+
 	err := svc.Initialize(ctx)
 	if err != nil {
 		return err
 	}
 
 	ctx.Logger().Debug("Running")
+	handle.setPhase(PhaseRunning)
+
 	err = svc.Run(ctx)
 	if err != nil {
 		return err
 	}
 
 	ctx.Logger().Debug("Shutting down")
+	handle.setPhase(PhaseShuttingDown)
+
 	shutdownErr := handle.Shutdown(ctx)
+	if shutdownErr != nil {
+		handle.setPhase(PhaseFailed)
+	} else {
+		handle.setPhase(PhaseFinished)
+	}
 
 	if err != nil {
 		return fail.WithAssociated(err, shutdownErr)
