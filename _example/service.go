@@ -3,13 +3,14 @@ package main
 import (
 	"time"
 
+	"github.com/FlowSeer/fail"
 	"github.com/FlowSeer/service"
 )
 
 const (
 	serviceName      = "example"
 	serviceVersion   = "0.0.1"
-	serviceNamespace = "FlowSeer"
+	serviceNamespace = "flowseer"
 )
 
 type exampleService struct{}
@@ -37,18 +38,16 @@ func (e exampleService) Error() error {
 }
 
 func (e exampleService) Initialize(ctx *service.Context) error {
-	ctx.Info("Initializing service...")
 	return nil
 }
 
 func (e exampleService) Run(ctx *service.Context) error {
-	ctx.Info("Sleeping for 10 seconds...")
-	time.Sleep(10 * time.Second)
+	ctx.Info("Sleeping for 2 seconds...")
+	time.Sleep(2 * time.Second)
 	ctx.Info("Done sleeping.")
 	return nil
 }
 
 func (e exampleService) Shutdown(ctx *service.Context) error {
-	ctx.Info("Shutting down service...")
-	return nil
+	return fail.Msg("test")
 }

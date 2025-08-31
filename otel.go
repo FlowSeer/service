@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"os"
+	"time"
 
+	"github.com/FlowSeer/fail"
+	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel/metric"
 	metricNoop "go.opentelemetry.io/otel/metric/noop"
 	metricSdk "go.opentelemetry.io/otel/sdk/metric"
@@ -29,6 +32,9 @@ type tracerProviderKey struct{}
 
 // meterProviderKey is the context key type for storing a MeterProvider in a context.
 type meterProviderKey struct{}
+
+// OtelShutdownFunc is a function that shuts down an OpenTelemetry component.
+type OtelShutdownFunc func(context.Context) error
 
 // WithTracer returns a new context with the specified OpenTelemetry Tracer attached.
 // This allows downstream code to retrieve the Tracer using Tracer(ctx).
@@ -61,8 +67,20 @@ func TracerProvider(ctx context.Context) trace.TracerProvider {
 
 // TracerProviderFromEnv constructs a new OpenTelemetry TracerProvider using the provided options.
 // This is a convenience for initializing a TracerProvider, e.g., from environment configuration.
-func TracerProviderFromEnv(opts ...traceSdk.TracerProviderOption) trace.TracerProvider {
-	return traceSdk.NewTracerProvider(opts...)
+func TracerProviderFromEnv(ctx context.Context, opts ...traceSdk.TracerProviderOption) (trace.TracerProvider, OtelShutdownFunc, error) {
+	exporter, err := autoexport.NewSpanExporter(ctx)
+	if err != nil {
+		return traceNoop.NewTracerProvider(), OtelNoopShutdown, fail.New().
+			Context(ctx).
+			Cause(err).
+			Msg("failed to create OTEL span exporter")
+	}
+
+	return traceSdk.NewTracerProvider(append(opts,
+		traceSdk.WithBatcher(exporter,
+			traceSdk.WithBatchTimeout(1*time.Second),
+		),
+	)...), exporter.Shutdown, nil
 }
 
 // WithMeter returns a new context with the specified OpenTelemetry Meter attached.
@@ -98,8 +116,18 @@ func MeterProvider(ctx context.Context) metric.MeterProvider {
 
 // MeterProviderFromEnv constructs a new OpenTelemetry MeterProvider using the provided options.
 // This is a convenience for initializing a MeterProvider, e.g., from environment configuration.
-func MeterProviderFromEnv(opts ...metricSdk.Option) metric.MeterProvider {
-	return metricSdk.NewMeterProvider(opts...)
+func MeterProviderFromEnv(ctx context.Context, opts ...metricSdk.Option) (metric.MeterProvider, OtelShutdownFunc, error) {
+	reader, err := autoexport.NewMetricReader(ctx)
+	if err != nil {
+		return metricNoop.NewMeterProvider(), OtelNoopShutdown, fail.New().
+			Context(ctx).
+			Cause(err).
+			Msg("failed to create OTEL metric exporter")
+	}
+
+	return metricSdk.NewMeterProvider(append(opts,
+		metricSdk.WithReader(reader),
+	)...), reader.Shutdown, nil
 }
 
 // IsOtelEnabled checks whether OpenTelemetry instrumentation is enabled by looking for an
@@ -108,4 +136,9 @@ func MeterProviderFromEnv(opts ...metricSdk.Option) metric.MeterProvider {
 func IsOtelEnabled(prefix string) bool {
 	_, ok := os.LookupEnv(EnvName(prefix, OtelEnableEnvVar))
 	return ok
+}
+
+// OtelNoopShutdown is a no-op OtelShutdownFunc.
+func OtelNoopShutdown(context.Context) error {
+	return nil
 }

@@ -18,9 +18,11 @@ type Context struct {
 	logger *slog.Logger
 
 	tracerProvider trace.TracerProvider
+	tracerShutdown OtelShutdownFunc
 	defaultTracer  trace.Tracer
 
 	meterProvider metric.MeterProvider
+	meterShutdown OtelShutdownFunc
 	defaultMeter  metric.Meter
 }
 

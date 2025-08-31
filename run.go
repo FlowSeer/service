@@ -169,7 +169,7 @@ func run(ctx context.Context, eg *errgroup.Group, svc Service) *Handle {
 
 	handle := createHandle(svc, svcCtx)
 	eg.Go(func() error {
-		svcErr := runInner(svcCtx, handle)
+		svcErr := runBlocking(svcCtx, svc, handle)
 		handle.setStopped(svcErr)
 
 		return svcErr
@@ -178,8 +178,27 @@ func run(ctx context.Context, eg *errgroup.Group, svc Service) *Handle {
 	return handle
 }
 
-func runInner(ctx *Context, handle *Handle) error {
-	return fail.New().Context(ctx).Msg("not implemented")
+func runBlocking(ctx *Context, svc Service, handle *Handle) error {
+	ctx.Logger().Debug("Initializing")
+	err := svc.Initialize(ctx)
+	if err != nil {
+		return err
+	}
+
+	ctx.Logger().Debug("Running")
+	err = svc.Run(ctx)
+	if err != nil {
+		return err
+	}
+
+	ctx.Logger().Debug("Shutting down")
+	shutdownErr := handle.Shutdown(ctx)
+
+	if err != nil {
+		return fail.WithAssociated(err, shutdownErr)
+	} else {
+		return shutdownErr
+	}
 }
 
 func createContext(ctx context.Context, svc Service) (*Context, error) {
@@ -200,7 +219,9 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 
 	var (
 		tracerProvider trace.TracerProvider
+		tracerShutdown OtelShutdownFunc
 		meterProvider  metric.MeterProvider
+		meterShutdown  OtelShutdownFunc
 	)
 	if IsOtelEnabled(svc.Name()) {
 		res, err := resource.New(ctx, resource.WithAttributes(
@@ -212,17 +233,25 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 			return nil, fail.Wrap(err, "failed to create OTEL resource")
 		}
 
-		tracerProvider = TracerProviderFromEnv(traceSdk.WithResource(res))
+		tracerProvider, tracerShutdown, err = TracerProviderFromEnv(ctx, traceSdk.WithResource(res))
+		if err != nil {
+			return nil, fail.Wrap(err, "failed to create OTEL tracer provider")
+		}
 
-		meterProvider = MeterProviderFromEnv(metricSdk.WithResource(res))
+		meterProvider, meterShutdown, err = MeterProviderFromEnv(ctx, metricSdk.WithResource(res))
+		if err != nil {
+			return nil, fail.Wrap(err, "failed to create OTEL meter provider")
+		}
 	} else {
 		logger.Warn(fmt.Sprintf(
-			"OTEL instrumentation is disabled. It must be opted in explicitly by setting the %s environment variable to a non-empty value.",
+			"Set env %s=true to enable OpenTelemetry.",
 			EnvName(svc.Name(), OtelEnableEnvVar)),
 		)
 
 		tracerProvider = traceNoop.NewTracerProvider()
+		tracerShutdown = OtelNoopShutdown
 		meterProvider = metricNoop.NewMeterProvider()
+		meterShutdown = OtelNoopShutdown
 	}
 
 	ctx = WithTracerProvider(ctx, tracerProvider)
@@ -238,8 +267,10 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 		Context:        ctx,
 		logger:         logger,
 		tracerProvider: tracerProvider,
-		meterProvider:  meterProvider,
+		tracerShutdown: tracerShutdown,
 		defaultTracer:  tracer,
+		meterProvider:  meterProvider,
+		meterShutdown:  meterShutdown,
 		defaultMeter:   meter,
 	}, nil
 }

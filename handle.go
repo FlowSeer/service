@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/FlowSeer/fail"
@@ -85,7 +87,7 @@ func (h *Handle) Shutdown(ctx context.Context) error {
 		}
 	})
 
-	return h.Wait()
+	return h.getShutdownErr()
 }
 
 func (h *Handle) setStopped(err error) {
@@ -157,7 +159,41 @@ func createHandle(svc Service, svcContext *Context) *Handle {
 		version:   svc.Version(),
 		exitSig:   make(chan struct{}),
 		shutdownFunc: func(ctx context.Context) error {
-			return svc.Shutdown(svcContext)
+			sig := make(chan struct{})
+
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						e := ctx.Err()
+						switch {
+						case errors.Is(e, context.Canceled):
+							svcContext.Error("Shutdown canceled")
+						case errors.Is(e, context.DeadlineExceeded):
+							svcContext.Error("Shutdown timed out")
+						}
+
+						os.Exit(fail.ExitCode(e))
+					case <-sig:
+						return
+					}
+				}
+			}()
+
+			var errs []error
+
+			if err := svc.Shutdown(svcContext); err != nil {
+				errs = append(errs, err)
+			}
+			if err := svcContext.meterShutdown(ctx); err != nil {
+				errs = append(errs, err)
+			}
+			if err := svcContext.tracerShutdown(ctx); err != nil {
+				errs = append(errs, err)
+			}
+
+			close(sig)
+			return fail.WrapMany("Failed to shutdown cleanly", errs...)
 		},
 	}
 }
