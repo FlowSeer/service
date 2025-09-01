@@ -1,9 +1,64 @@
 package service
 
 import (
+	"context"
 	"regexp"
 	"strings"
 )
+
+// nameKey is an unexported type used as a context key for storing the service name.
+type nameKey struct{}
+
+// versionKey is an unexported type used as a context key for storing the service version.
+type versionKey struct{}
+
+// namespaceKey is an unexported type used as a context key for storing the service namespace.
+type namespaceKey struct{}
+
+// WithName returns a new context derived from ctx that carries the provided service name.
+// The name can later be retrieved using the Name function.
+func WithName(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, nameKey{}, name)
+}
+
+// Name extracts the service name from the context, if present.
+// If no name is set, it returns the empty string.
+func Name(ctx context.Context) string {
+	if name, ok := ctx.Value(nameKey{}).(string); ok {
+		return name
+	}
+	return ""
+}
+
+// WithVersion returns a new context derived from ctx that carries the provided service version.
+// The version can later be retrieved using the Version function.
+func WithVersion(ctx context.Context, version string) context.Context {
+	return context.WithValue(ctx, versionKey{}, version)
+}
+
+// Version extracts the service version from the context, if present.
+// If no version is set, it returns the empty string.
+func Version(ctx context.Context) string {
+	if version, ok := ctx.Value(versionKey{}).(string); ok {
+		return version
+	}
+	return ""
+}
+
+// WithNamespace returns a new context derived from ctx that carries the provided service namespace.
+// The namespace can later be retrieved using the Namespace function.
+func WithNamespace(ctx context.Context, namespace string) context.Context {
+	return context.WithValue(ctx, namespaceKey{}, namespace)
+}
+
+// Namespace extracts the service namespace from the context, if present.
+// If no namespace is set, it returns the empty string.
+func Namespace(ctx context.Context) string {
+	if namespace, ok := ctx.Value(namespaceKey{}).(string); ok {
+		return namespace
+	}
+	return ""
+}
 
 // EnvName constructs a normalized environment variable name by combining a prefix and a name.
 // If the prefix is empty, it defaults to "SERVICE_".

@@ -215,6 +215,10 @@ func runBlocking(ctx *Context, svc Service, handle *Handle) error {
 }
 
 func createContext(ctx context.Context, svc Service) (*Context, error) {
+	ctx = WithName(ctx, svc.Version())
+	ctx = WithVersion(ctx, svc.Version())
+	ctx = WithNamespace(ctx, svc.Namespace())
+
 	ctx = fail.ContextWithAttributes(ctx, map[string]any{
 		"service.name":      svc.Name(),
 		"service.version":   svc.Version(),
