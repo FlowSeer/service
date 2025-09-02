@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel/metric"
 	metricNoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
 	metricSdk "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	traceSdk "go.opentelemetry.io/otel/sdk/trace"
@@ -283,6 +284,13 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 
 	ctx = WithTracerProvider(ctx, tracerProvider)
 	ctx = WithMeterProvider(ctx, meterProvider)
+
+	// We explicitly do NOT set the propagator globally, as multiple services may use different ones
+	// Right now, all services have the same propagator behaviour, but this leaves the option to change it later
+	propagator := propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{},
+	)
+	ctx = WithTextMapPropagator(ctx, propagator)
 
 	tracer := tracerProvider.Tracer(InstrumentationName, trace.WithInstrumentationVersion(InstrumentationVersion))
 	ctx = WithTracer(ctx, tracer)
