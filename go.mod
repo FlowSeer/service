@@ -5,7 +5,7 @@ go 1.24.5
 tool golang.org/x/tools/cmd/stringer
 
 require (
-	github.com/FlowSeer/fail v0.0.7
+	github.com/FlowSeer/fail v0.0.8
 	go.opentelemetry.io/contrib/exporters/autoexport v0.63.0
 	go.opentelemetry.io/contrib/instrumentation/host v0.63.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.63.0

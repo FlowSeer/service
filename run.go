@@ -28,7 +28,7 @@ import (
 func RunAndExit(ctx context.Context, svc Service) {
 	err := RunAndWait(ctx, svc)
 	if err != nil {
-		println(fail.PrintPretty(err))
+		fail.PrintPretty(err)
 		os.Exit(fail.ExitCode(err))
 	} else {
 		os.Exit(0)

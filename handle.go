@@ -193,7 +193,7 @@ func createHandle(svc Service, svcContext *Context) *Handle {
 			}
 
 			close(sig)
-			return fail.WrapMany("Failed to shutdown cleanly", errs...)
+			return fail.WrapMany("Shutdown encountered an error", errs...)
 		},
 	}
 }
