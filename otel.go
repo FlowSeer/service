@@ -261,7 +261,7 @@ func isEnvDisabled(prefix string, envVar string) bool {
 	v, ok := os.LookupEnv(EnvName(prefix, envVar))
 	if !ok {
 		// opt-out
-		return true
+		return false
 	}
 
 	switch strings.ToLower(v) {
