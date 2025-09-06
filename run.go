@@ -3,15 +3,21 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 
 	"github.com/FlowSeer/fail"
+	slogmulti "github.com/samber/slog-multi"
+	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/host"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
+	"go.opentelemetry.io/otel/log"
+	logNoop "go.opentelemetry.io/otel/log/noop"
 	"go.opentelemetry.io/otel/metric"
 	metricNoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
+	logSdk "go.opentelemetry.io/otel/sdk/log"
 	metricSdk "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	traceSdk "go.opentelemetry.io/otel/sdk/trace"
@@ -194,9 +200,6 @@ func runBlocking(ctx *Context, svc Service, handle *Handle) error {
 	handle.setPhase(PhaseRunning)
 
 	err = svc.Run(ctx)
-	if err != nil {
-		return err
-	}
 
 	ctx.Logger().Debug("Shutting down")
 	handle.setPhase(PhaseShuttingDown)
@@ -236,11 +239,15 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 	ctx = WithLogger(ctx, logger)
 
 	var (
-		tracerProvider trace.TracerProvider
-		tracerShutdown OtelShutdownFunc
-		meterProvider  metric.MeterProvider
-		meterShutdown  OtelShutdownFunc
+		tracerProvider trace.TracerProvider = traceNoop.NewTracerProvider()
+		tracerShutdown                      = OtelNoopShutdown
+		meterProvider  metric.MeterProvider = metricNoop.NewMeterProvider()
+		meterShutdown                       = OtelNoopShutdown
+		loggerProvider log.LoggerProvider   = logNoop.NewLoggerProvider()
+		loggerShutdown                      = OtelNoopShutdown
 	)
+
+	// OTEL is opt-in, but individual components must be enabled explicitly
 	if IsOtelEnabled(svc.Name()) {
 		res, err := resource.New(ctx, resource.WithAttributes(
 			semconv.ServiceName(svc.Name()),
@@ -251,39 +258,57 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 			return nil, fail.Wrap(err, "failed to create OTEL resource")
 		}
 
-		tracerProvider, tracerShutdown, err = TracerProviderFromEnv(ctx, traceSdk.WithResource(res))
-		if err != nil {
-			return nil, fail.Wrap(err, "failed to create OTEL tracer provider")
+		if !IsOtelMetricsDisabled(svc.Name()) {
+			meterProvider, meterShutdown, err = MeterProviderFromEnv(ctx, metricSdk.WithResource(res))
+			if err != nil {
+				return nil, fail.Wrap(err, "failed to create OTEL meter provider")
+			}
+
+			err = runtime.Start(runtime.WithMeterProvider(meterProvider))
+			if err != nil {
+				return nil, fail.Wrap(err, "failed to start collection of runtime metrics")
+			}
+
+			err = host.Start(host.WithMeterProvider(meterProvider))
+			if err != nil {
+				return nil, fail.Wrap(err, "failed to start collection of host metrics")
+			}
 		}
 
-		meterProvider, meterShutdown, err = MeterProviderFromEnv(ctx, metricSdk.WithResource(res))
-		if err != nil {
-			return nil, fail.Wrap(err, "failed to create OTEL meter provider")
+		if !IsOtelTracesDisabled(svc.Name()) {
+			tracerProvider, tracerShutdown, err = TracerProviderFromEnv(ctx, traceSdk.WithResource(res))
+			if err != nil {
+				return nil, fail.Wrap(err, "failed to create OTEL tracer provider")
+			}
 		}
 
-		err = runtime.Start(runtime.WithMeterProvider(meterProvider))
-		if err != nil {
-			return nil, fail.Wrap(err, "failed to start collection of runtime metrics")
-		}
+		if !IsOtelLogsDisabled(svc.Name()) {
+			loggerProvider, loggerShutdown, err = LoggerProviderFromEnv(ctx, logSdk.WithResource(res))
+			if err != nil {
+				return nil, fail.Wrap(err, "failed to create OTEL logger provider")
+			}
 
-		err = host.Start(host.WithMeterProvider(meterProvider))
-		if err != nil {
-			return nil, fail.Wrap(err, "failed to start collection of host metrics")
+			// Create a fanout logger that logs to the OTEL logger and to the already configured logger
+			// This may result in duplicate log messages if not configured correctly
+			logger = slog.New(slogmulti.Fanout(
+				logger.Handler(),
+				otelslog.NewHandler(
+					fmt.Sprintf("%s@%s", svc.Name(), svc.Version()),
+					otelslog.WithLoggerProvider(loggerProvider),
+					otelslog.WithSource(true),
+				),
+			))
 		}
 	} else {
 		logger.Warn(fmt.Sprintf(
 			"Set env %s=true to enable OpenTelemetry.",
 			EnvName(svc.Name(), OtelEnableEnvVar)),
 		)
-
-		tracerProvider = traceNoop.NewTracerProvider()
-		tracerShutdown = OtelNoopShutdown
-		meterProvider = metricNoop.NewMeterProvider()
-		meterShutdown = OtelNoopShutdown
 	}
 
 	ctx = WithTracerProvider(ctx, tracerProvider)
 	ctx = WithMeterProvider(ctx, meterProvider)
+	ctx = WithLoggerProvider(ctx, loggerProvider)
 
 	// We explicitly do NOT set the propagator globally, as multiple services may use different ones
 	// Right now, all services have the same propagator behaviour, but this leaves the option to change it later
@@ -306,6 +331,8 @@ func createContext(ctx context.Context, svc Service) (*Context, error) {
 		defaultTracer:  tracer,
 		meterProvider:  meterProvider,
 		meterShutdown:  meterShutdown,
+		loggerProvider: loggerProvider,
+		loggerShutdown: loggerShutdown,
 		defaultMeter:   meter,
 	}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -23,10 +24,27 @@ type Context struct {
 
 	meterProvider metric.MeterProvider
 	meterShutdown OtelShutdownFunc
-	defaultMeter  metric.Meter
+
+	loggerProvider log.LoggerProvider
+	loggerShutdown OtelShutdownFunc
+
+	defaultMeter metric.Meter
 }
 
-// Logger returns the slog.Logger associated with this Context.
+// LoggerProvider returns the OpenTelemetry LoggerProvider associated with this Context.
+//
+// This provider is used to create OpenTelemetry-compatible loggers. If OpenTelemetry logging
+// is enabled, the slog.Logger returned by Logger() will be configured to bridge logs to this
+// LoggerProvider, allowing logs to be exported via OpenTelemetry pipelines.
+func (c *Context) LoggerProvider() log.LoggerProvider {
+	return c.loggerProvider
+}
+
+// Logger returns the slog.Logger instance associated with this Context.
+//
+// This logger is intended for application logging and may be configured to bridge logs
+// to OpenTelemetry if OTEL logging is enabled. Use this logger for all structured logging
+// within service implementations to ensure logs are properly captured and exported.
 func (c *Context) Logger() *slog.Logger {
 	return c.logger
 }
