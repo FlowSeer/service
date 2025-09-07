@@ -199,7 +199,27 @@ func runBlocking(ctx *Context, svc Service, handle *Handle) error {
 	ctx.Logger().Debug("Running")
 	handle.setPhase(PhaseRunning)
 
-	err = svc.Run(ctx)
+	runFn := func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				switch x := r.(type) {
+				case error:
+					err = fail.From(x).
+						Associate(err).
+						Msg("service panicked")
+				default:
+					err = fail.New().
+						Cause(fail.Msgf("%v", x)).
+						Associate(err).
+						Msg("service panicked")
+				}
+			}
+		}()
+
+		return svc.Run(ctx)
+	}
+
+	err = runFn()
 
 	ctx.Logger().Debug("Shutting down")
 	handle.setPhase(PhaseShuttingDown)
