@@ -3,13 +3,17 @@ package service
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/FlowSeer/fail"
 	"go.opentelemetry.io/contrib/exporters/autoexport"
+	"go.opentelemetry.io/otel/log"
+	logNoop "go.opentelemetry.io/otel/log/noop"
 	"go.opentelemetry.io/otel/metric"
 	metricNoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
+	logSdk "go.opentelemetry.io/otel/sdk/log"
 	metricSdk "go.opentelemetry.io/otel/sdk/metric"
 	traceSdk "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -17,9 +21,12 @@ import (
 )
 
 const (
-	OtelEnableEnvVar       = "OTEL_ENABLED"
-	InstrumentationName    = "github.com/FlowSeer/service"
-	InstrumentationVersion = "0.0.1"
+	OtelEnableEnvVar         = "OTEL_ENABLED"
+	OtelMetricsEnabledEnvVar = "OTEL_METRICS_ENABLED"
+	OtelTracesEnabledEnvVar  = "OTEL_TRACES_ENABLED"
+	OtelLogsEnabledEnvVar    = "OTEL_LOGS_ENABLED"
+	InstrumentationName      = "github.com/FlowSeer/service"
+	InstrumentationVersion   = "0.0.1"
 )
 
 // tracerKey is the context key type for storing the default service Tracer in a context.
@@ -36,6 +43,9 @@ type textMapPropagatorKey struct{}
 
 // meterProviderKey is the context key type for storing a MeterProvider in a context.
 type meterProviderKey struct{}
+
+// loggerProviderKey is the context key type for storing a LoggerProvider in a context.
+type loggerProviderKey struct{}
 
 // OtelShutdownFunc is a function that shuts down an OpenTelemetry component.
 type OtelShutdownFunc func(context.Context) error
@@ -152,6 +162,40 @@ func Meter(ctx context.Context) metric.Meter {
 	return MeterProvider(ctx).Meter(InstrumentationName, metric.WithInstrumentationVersion(InstrumentationVersion))
 }
 
+// LoggerProviderFromEnv constructs a new OpenTelemetry LoggerProvider using environment variables as defined by
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md.
+func LoggerProviderFromEnv(ctx context.Context, opts ...logSdk.LoggerProviderOption) (log.LoggerProvider, OtelShutdownFunc, error) {
+	exporter, err := autoexport.NewLogExporter(ctx)
+	if err != nil {
+		return logNoop.NewLoggerProvider(), OtelNoopShutdown, fail.New().
+			Context(ctx).
+			Cause(err).
+			Msg("failed to create OTEL log exporter")
+	}
+
+	return logSdk.NewLoggerProvider(append(opts,
+		logSdk.WithProcessor(
+			logSdk.NewBatchProcessor(exporter),
+		),
+	)...), exporter.Shutdown, nil
+}
+
+// WithLoggerProvider returns a new context with the specified log exporter attached.
+// If the exporter is nil, the context is returned unchanged.
+func WithLoggerProvider(ctx context.Context, exp log.LoggerProvider) context.Context {
+	return context.WithValue(ctx, loggerProviderKey{}, exp)
+}
+
+// LoggerProvider retrieves the log exporter from the context, if present.
+// If no exporter is set in the context, a no-op exporter is returned.s
+func LoggerProvider(ctx context.Context) log.LoggerProvider {
+	if exp, ok := ctx.Value(loggerProviderKey{}).(log.LoggerProvider); ok {
+		return exp
+	}
+
+	return logNoop.NewLoggerProvider()
+}
+
 // WithTextMapPropagator returns a new context with the specified TextMapPropagator attached.
 // If the propagator is nil, the context is returned unchanged.
 func WithTextMapPropagator(ctx context.Context, tmp propagation.TextMapPropagator) context.Context {
@@ -173,15 +217,57 @@ func TextMapPropagator(ctx context.Context) propagation.TextMapPropagator {
 	return propagation.NewCompositeTextMapPropagator()
 }
 
-// IsOtelEnabled checks whether OpenTelemetry instrumentation is enabled by looking for an
-// environment variable named {PREFIX}_OTEL_ENABLED (normalized using EnvName).
-// Returns true if the variable is set, false otherwise.
+// IsOtelEnabled checks whether OpenTelemetry instrumentation is enabled for the given prefix.
+// Instrumentation is opt-in: returns true if the environment variable is set to a value that indicates enabled, false otherwise.
 func IsOtelEnabled(prefix string) bool {
-	_, ok := os.LookupEnv(EnvName(prefix, OtelEnableEnvVar))
-	return ok
+	v, ok := os.LookupEnv(EnvName(prefix, OtelEnableEnvVar))
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(v) {
+	case "true", "on", "yes", "enable", "enabled", "1":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsOtelMetricsDisabled reports whether OpenTelemetry metrics instrumentation is disabled for the given prefix.
+// Metrics are enabled by default; setting the appropriate environment variable disables them (opt-out).
+func IsOtelMetricsDisabled(prefix string) bool {
+	return isEnvDisabled(prefix, OtelMetricsEnabledEnvVar)
+}
+
+// IsOtelTracesDisabled reports whether OpenTelemetry traces instrumentation is disabled for the given prefix.
+// Traces are enabled by default; setting the appropriate environment variable disables them (opt-out).
+func IsOtelTracesDisabled(prefix string) bool {
+	return isEnvDisabled(prefix, OtelTracesEnabledEnvVar)
+}
+
+// IsOtelLogsDisabled reports whether OpenTelemetry logs instrumentation is disabled for the given prefix.
+// Logs are enabled by default; setting the appropriate environment variable disables them (opt-out).
+func IsOtelLogsDisabled(prefix string) bool {
+	return isEnvDisabled(prefix, OtelLogsEnabledEnvVar)
 }
 
 // OtelNoopShutdown is a no-op OtelShutdownFunc.
 func OtelNoopShutdown(context.Context) error {
 	return nil
+}
+
+// isEnvDisabled checks if the environment variable is set to a value that indicates it is disabled.
+// It returns true if the variable is set to a value that indicates it is disabled, false otherwise.
+func isEnvDisabled(prefix string, envVar string) bool {
+	v, ok := os.LookupEnv(EnvName(prefix, envVar))
+	if !ok {
+		// opt-out
+		return false
+	}
+
+	switch strings.ToLower(v) {
+	case "false", "off", "no", "disable", "disabled":
+		return true
+	default:
+		return false
+	}
 }
