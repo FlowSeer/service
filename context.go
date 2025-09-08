@@ -69,17 +69,22 @@ func (c *Context) Meter() metric.Meter {
 	return c.defaultMeter
 }
 
+// Debug logs an debug message using the Context's logger.
+func (c *Context) Debug(msg string, args ...any) {
+	c.logger.Debug(msg, args...)
+}
+
 // Info logs an informational message using the Context's logger.
-func (c *Context) Info(msg string, args ...interface{}) {
+func (c *Context) Info(msg string, args ...any) {
 	c.logger.Info(msg, args...)
 }
 
 // Warn logs a warning message using the Context's logger.
-func (c *Context) Warn(msg string, args ...interface{}) {
+func (c *Context) Warn(msg string, args ...any) {
 	c.logger.Warn(msg, args...)
 }
 
 // Error logs an error message using the Context's logger.
-func (c *Context) Error(msg string, args ...interface{}) {
+func (c *Context) Error(msg string, args ...any) {
 	c.logger.Error(msg, args...)
 }
