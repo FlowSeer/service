@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/FlowSeer/fail"
+	"github.com/joho/godotenv"
 	slogmulti "github.com/samber/slog-multi"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/host"
@@ -171,6 +172,8 @@ func runAll(ctx context.Context, grouped bool, svcs []Service) []*Handle {
 // that can be used to wait for the service to finish or to shut it down.
 // The service is being run in parallel using the provided error group.
 func run(ctx context.Context, eg *errgroup.Group, svc Service) *Handle {
+	_ = godotenv.Load()
+
 	svcCtx, err := createContext(ctx, svc)
 	if err != nil {
 		return createErrorHandle(svc, err)
