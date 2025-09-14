@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"strings"
+
+	"github.com/FlowSeer/fail"
 )
 
 // nameKey is an unexported type used as a context key for storing the service name.
@@ -81,6 +84,54 @@ func EnvName(prefix string, name string) string {
 	}
 
 	return NormalizeEnvName(prefix + name)
+}
+
+// LookupEnv retrieves the value of the environment variable constructed from the given prefix and name.
+// The environment variable name is normalized using EnvName(prefix, name).
+// Returns the value and a boolean indicating whether the variable was present.
+func LookupEnv(prefix string, name string) (string, bool) {
+	return os.LookupEnv(EnvName(prefix, name))
+}
+
+// GetEnv returns the value of the environment variable constructed from the given prefix and name.
+// The environment variable name is normalized using EnvName(prefix, name).
+// If the variable is not present, GetEnv returns the empty string.
+func GetEnv(prefix string, name string) string {
+	return os.Getenv(EnvName(prefix, name))
+}
+
+// GetEnvOrDefault returns the value of the environment variable constructed from the given prefix and name,
+// or the provided defaultValue if the variable is not set.
+// The environment variable name is normalized using EnvName(prefix, name).
+func GetEnvOrDefault(prefix string, name string, defaultValue string) string {
+	if value, ok := LookupEnv(prefix, name); ok {
+		return value
+	}
+	return defaultValue
+}
+
+// MustGetEnv retrieves the value of the environment variable constructed from the given prefix and name.
+// The environment variable name is normalized using EnvName(prefix, name).
+// If the variable is not set, MustGetEnv returns an error indicating that the environment variable must be set.
+// This function is useful for required configuration values that must be present at runtime.
+//
+// Example usage:
+//
+//	val, err := MustGetEnv("MYAPP", "API_KEY")
+//	if err != nil {
+//	    return fail.WithContext(ctx, err)
+//	}
+func MustGetEnv(prefix string, name string) (string, error) {
+	envName := EnvName(prefix, name)
+
+	value, ok := LookupEnv(prefix, name)
+	if !ok {
+		return "", fail.New().
+			Attribute("envName", envName).
+			Msgf("environment variable must be set: %s", envName)
+	}
+
+	return value, nil
 }
 
 // NormalizeEnvName transforms an input string into a valid, conventional environment variable name.
