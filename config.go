@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"dario.cat/mergo"
 	"github.com/FlowSeer/fail"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/parsers/toml/v2"
 	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
@@ -58,25 +61,25 @@ func DefaultConfigOptions(ctx context.Context) *ConfigOptions {
 
 // ReadConfig reads configuration into a struct of type T using the provided options.
 // Returns a pointer to the struct and an error, if any.
-func ReadConfig[T any](opts ...ConfigOption) (*T, error) {
-	o := DefaultConfigOptions(context.Background())
+func ReadConfig[T any](ctx context.Context, opts ...ConfigOption) (*T, error) {
+	o := DefaultConfigOptions(ctx)
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	return ReadConfigWithOptions[T](o)
+	return ReadConfigWithOptions[T](ctx, o)
 }
 
 // ReadConfigFile reads configuration from the specified file path and applies any additional options.
 // Returns a pointer to the struct and an error, if any.
-func ReadConfigFile[T any](path string, opts ...ConfigOption) (*T, error) {
-	return ReadConfig[T](append(opts, WithConfigFilePath(path))...)
+func ReadConfigFile[T any](ctx context.Context, path string, opts ...ConfigOption) (*T, error) {
+	return ReadConfig[T](ctx, append(opts, WithConfigFilePath(path))...)
 }
 
 // ReadConfigWithOptions reads configuration using the provided ConfigOptions struct.
 // Returns a pointer to the struct and an error, if any.
-func ReadConfigWithOptions[T any](opts *ConfigOptions) (*T, error) {
-	return readConfig[T](opts)
+func ReadConfigWithOptions[T any](ctx context.Context, opts *ConfigOptions) (*T, error) {
+	return readConfig[T](ctx, opts)
 }
 
 // WithConfigFilePath returns a ConfigOption that appends the given file path to the list of config files.
@@ -125,14 +128,14 @@ func WithTagName(tagName string) ConfigOption {
 }
 
 // readConfig implements the actual logic for reading configuration.
-func readConfig[T any](opts *ConfigOptions) (_ *T, err error) {
+func readConfig[T any](ctx context.Context, opts *ConfigOptions) (_ *T, err error) {
 	if opts == nil {
 		opts = DefaultConfigOptions(context.Background())
 	}
 
 	var envCfg *T
 	if opts.EnvVars {
-		envCfg, err = readEnvConfig[T](opts)
+		envCfg, err = readEnvConfig[T](ctx, opts)
 		if err != nil {
 			return nil, fail.Wrap(err, "failed to read environment variables")
 		}
@@ -140,7 +143,7 @@ func readConfig[T any](opts *ConfigOptions) (_ *T, err error) {
 
 	var fileCfgs []*T
 	for _, path := range opts.Files {
-		cfg, err := readFileConfig[T](path, opts)
+		cfg, err := readFileConfig[T](ctx, path, opts)
 
 		if err != nil {
 			if opts.FilesRequired {
@@ -172,7 +175,7 @@ func readConfig[T any](opts *ConfigOptions) (_ *T, err error) {
 }
 
 // readFileConfig reads configuration from the specified file path.
-func readFileConfig[T any](path string, opts *ConfigOptions) (*T, error) {
+func readFileConfig[T any](ctx context.Context, path string, opts *ConfigOptions) (*T, error) {
 	k := koanf.New(".")
 	parsers := []koanf.Parser{
 		yaml.Parser(),
@@ -200,7 +203,9 @@ func readFileConfig[T any](path string, opts *ConfigOptions) (*T, error) {
 	}
 
 	var t T
-	if err := k.Unmarshal(".", &t); err != nil {
+	if err := k.UnmarshalWithConf(".", &t, koanf.UnmarshalConf{
+		Tag: opts.TagName,
+	}); err != nil {
 		return nil, fail.Wrap(err, "failed to unmarshal config file")
 	}
 
@@ -208,8 +213,30 @@ func readFileConfig[T any](path string, opts *ConfigOptions) (*T, error) {
 }
 
 // readEnvConfig reads configuration from environment variables.
-func readEnvConfig[T any](opts *ConfigOptions) (*T, error) {
+func readEnvConfig[T any](_ context.Context, opts *ConfigOptions) (*T, error) {
 	k := koanf.New(".")
-	_ = k
-	return nil, nil
+
+	prefix := NormalizeEnvName(opts.EnvVarsPrefix) + "_"
+	err := k.Load(env.Provider(".", env.Opt{
+		Prefix: prefix,
+		TransformFunc: func(k, v string) (string, any) {
+			return strings.ToLower(
+				strings.TrimPrefix(k, prefix),
+			), v
+		},
+	}), nil)
+	if err != nil {
+		return nil, fail.Wrap(err, "failed to load environment variables")
+	}
+
+	var envCfg T
+	if err := k.UnmarshalWithConf("", &envCfg, koanf.UnmarshalConf{
+		Tag: opts.TagName,
+	}); err != nil {
+		return nil, fail.Wrap(err, "failed to unmarshal environment variables")
+	}
+
+	fmt.Println(opts.TagName)
+
+	return &envCfg, nil
 }

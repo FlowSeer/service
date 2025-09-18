@@ -38,6 +38,17 @@ func (e exampleService) Error() error {
 }
 
 func (e exampleService) Initialize(ctx *service.Context) error {
+	type Config struct {
+		Test string `json:"test"`
+	}
+
+	cfg, err := service.ReadConfig[Config](ctx)
+	if err != nil {
+		return err
+	}
+
+	ctx.Info("config: ", cfg)
+
 	return nil
 }
 
